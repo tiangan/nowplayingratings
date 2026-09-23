@@ -8,6 +8,7 @@ description: List the movies currently playing in theaters with their IMDb ratin
 imdb.com disallows automated access, so don't try to fetch or scrape it. This skill uses two sources that allow it:
 
 - **TMDB API** (`/movie/now_playing`) for which films are in theaters in a region, plus each film's IMDb ID.
+- The script re-filters TMDB's results by `release_date` (dropping unreleased films and anything older than `--max-age-days`, default 45) so what's shown is actually still playing, not just near the release window.
 - **IMDb non-commercial datasets** (`title.ratings.tsv.gz`, refreshed daily) for the IMDb rating and vote count. Cached for ~20 hours in `~/.cache/now-playing`.
 
 ## Requirements
@@ -25,12 +26,12 @@ python3 scripts/now_playing.py --sort popularity --limit 15
 python3 scripts/now_playing.py --region GB --json   # other country, machine-readable
 ```
 
-Pick flags from what the user asked: "top rated" → `--sort rating --min-votes 1000`; "what's big right now" → `--sort popularity`; a country → `--region`.
+Pick flags from what the user asked: "top rated" → `--sort rating --min-votes 1000`; "what's big right now" → `--sort popularity`; a country → `--region`; "just this week" or "brand new" → a tighter `--max-age-days` (e.g. `14`).
 
 ## Presenting results
 
 - Show the table the script prints (titles link to IMDb). Keep commentary short.
 - New releases often have few votes, so mention that a rating on a few hundred votes can shift a lot in the first week.
 - "n/a" means IMDb has no rating yet (or TMDB had no IMDb ID); say so rather than inventing a number.
-- TMDB's "now playing" window is roughly the last few weeks of releases, so it can include films on their way out and a few limited releases; it is a close match to, not a copy of, IMDb's own "In Theaters" page.
+- The script already filters out films that haven't released yet or that released more than `--max-age-days` (default 45) ago, so the list reflects what's actually in theaters now, not TMDB's looser raw window.
 - Credit sources in one line: listings from TMDB, ratings from IMDb's datasets. TMDB's terms ask for attribution.

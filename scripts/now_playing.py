@@ -8,15 +8,20 @@ Sources (both permit this kind of personal use, unlike scraping imdb.com):
 Standard library only. Usage:
   export TMDB_TOKEN=...   # TMDB "API Read Access Token" (or TMDB_API_KEY=...)
   python3 now_playing.py [--region US] [--sort rating|votes|popularity|title]
-                         [--min-votes 0] [--limit 0] [--json]
+                         [--min-votes 0] [--limit 0] [--max-age-days 45] [--json]
 """
-import argparse, csv, gzip, io, json, os, sys, time, urllib.parse, urllib.request
+import argparse, csv, datetime, gzip, io, json, os, sys, time, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 TMDB = "https://api.themoviedb.org/3"
 RATINGS_URL = "https://datasets.imdbws.com/title.ratings.tsv.gz"
 CACHE_DIR = os.path.expanduser(os.environ.get("NOW_PLAYING_CACHE", "~/.cache/now-playing"))
 RATINGS_MAX_AGE = 20 * 3600  # IMDb refreshes the dataset daily
+# TMDB's own /movie/now_playing window is looser than "in theaters today": it
+# can include films that have already left theaters or that release later
+# this week. We tighten it to films released in the last N days and not yet
+# in the future, which matches what a theater actually has on screen today.
+DEFAULT_MAX_AGE_DAYS = 45
 
 
 def tmdb_get(path, **params):
@@ -55,6 +60,27 @@ def now_playing(region):
     return unique
 
 
+def is_actually_in_theaters(movie, max_age_days):
+    """Keep only films that have actually released and haven't aged out of theaters.
+
+    TMDB's now_playing endpoint pads its window with films that release later
+    this week and films that released weeks ago, so we re-filter by release_date.
+    """
+    release_date = movie.get("release_date")
+    if not release_date:
+        return False
+    try:
+        released = datetime.date.fromisoformat(release_date)
+    except ValueError:
+        return False
+    today = datetime.date.today()
+    if released > today:
+        return False
+    if max_age_days and (today - released).days > max_age_days:
+        return False
+    return True
+
+
 def imdb_id(tmdb_id):
     try:
         return tmdb_get(f"/movie/{tmdb_id}/external_ids").get("imdb_id")
@@ -84,10 +110,13 @@ def main():
     ap.add_argument("--sort", default="rating", choices=["rating", "votes", "popularity", "title"])
     ap.add_argument("--min-votes", type=int, default=0, help="hide films with fewer IMDb votes")
     ap.add_argument("--limit", type=int, default=0, help="show only the first N rows")
+    ap.add_argument("--max-age-days", type=int, default=DEFAULT_MAX_AGE_DAYS,
+                     help="hide films released more than N days ago (0 disables this filter)")
     ap.add_argument("--json", action="store_true", help="print JSON instead of a table")
     a = ap.parse_args()
 
     movies = now_playing(a.region)
+    movies = [m for m in movies if is_actually_in_theaters(m, a.max_age_days)]
     with ThreadPoolExecutor(max_workers=8) as pool:
         ids = list(pool.map(imdb_id, [m["id"] for m in movies]))
     ratings = load_ratings({i for i in ids if i})
